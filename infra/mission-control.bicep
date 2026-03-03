@@ -104,6 +104,8 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'DOCKER_REGISTRY_SERVER_URL',      value: 'https://${acr.properties.loginServer}' }
         { name: 'DOCKER_REGISTRY_SERVER_USERNAME', value: acr.listCredentials().username }
         { name: 'DOCKER_REGISTRY_SERVER_PASSWORD', value: acr.listCredentials().passwords[0].value }
+        // Allowed hosts: middleware default-denies all hosts in production unless listed here
+        { name: 'MC_ALLOWED_HOSTS', value: '${appName}.azurewebsites.net,ops.jaissolutions.com,localhost' }
         // Key Vault references — resolved at runtime via Managed Identity
         { name: 'AUTH_USER', value: '@Microsoft.KeyVault(SecretUri=https://${keyVaultName}.vault.azure.net/secrets/MissionControlAuthUser/)' }
         { name: 'AUTH_PASS', value: '@Microsoft.KeyVault(SecretUri=https://${keyVaultName}.vault.azure.net/secrets/MissionControlAuthPass/)' }
