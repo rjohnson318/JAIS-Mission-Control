@@ -122,6 +122,19 @@ function isOverdue(ts: number): boolean {
   return ts * 1000 < Date.now()
 }
 
+function getTagColor(tag: string): string {
+  const t = tag.toLowerCase()
+  if (t.includes('urgent') || t.includes('critical') || t === 'sec') return 'bg-red-500/20 text-red-400 border-red-500/30'
+  if (t.includes('bug') || t.includes('fix')) return 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+  if (t.includes('feature') || t.includes('enhancement') || t === 'feat') return 'bg-green-500/20 text-green-400 border-green-500/30'
+  if (t.includes('research') || t.includes('analysis') || t === 'ops') return 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+  if (t.includes('deploy') || t.includes('release') || t === 'infra') return 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+  if (t === 'auto') return 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30'
+  if (t === 'crm') return 'bg-pink-500/20 text-pink-400 border-pink-500/30'
+  if (t === 'billing') return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+  return 'bg-muted-foreground/10 text-muted-foreground border-muted-foreground/20'
+}
+
 export function TaskBoardPanel() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
@@ -295,26 +308,6 @@ export function TaskBoardPanel() {
     if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`
     if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`
     return 'just now'
-  }
-
-  const getTagColor = (tag: string) => {
-    const lowerTag = tag.toLowerCase()
-    if (lowerTag.includes('urgent') || lowerTag.includes('critical')) {
-      return 'bg-red-500/20 text-red-400 border-red-500/30'
-    }
-    if (lowerTag.includes('bug') || lowerTag.includes('fix')) {
-      return 'bg-orange-500/20 text-orange-400 border-orange-500/30'
-    }
-    if (lowerTag.includes('feature') || lowerTag.includes('enhancement')) {
-      return 'bg-green-500/20 text-green-400 border-green-500/30'
-    }
-    if (lowerTag.includes('research') || lowerTag.includes('analysis')) {
-      return 'bg-purple-500/20 text-purple-400 border-purple-500/30'
-    }
-    if (lowerTag.includes('deploy') || lowerTag.includes('release')) {
-      return 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-    }
-    return 'bg-muted-foreground/10 text-muted-foreground border-muted-foreground/20'
   }
 
   // Get agent name by session key
