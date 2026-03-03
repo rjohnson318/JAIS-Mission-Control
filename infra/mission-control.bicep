@@ -106,6 +106,8 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'DOCKER_REGISTRY_SERVER_PASSWORD', value: acr.listCredentials().passwords[0].value }
         // Allowed hosts: middleware default-denies all hosts in production unless listed here
         { name: 'MC_ALLOWED_HOSTS', value: '${appName}.azurewebsites.net,ops.jaissolutions.com,localhost' }
+        // Point SQLite data dir to persistent Azure Files mount
+        { name: 'MISSION_CONTROL_DATA_DIR', value: '/home/data' }
         // Key Vault references — resolved at runtime via Managed Identity
         { name: 'AUTH_USER', value: '@Microsoft.KeyVault(SecretUri=https://${keyVaultName}.vault.azure.net/secrets/MissionControlAuthUser/)' }
         { name: 'AUTH_PASS', value: '@Microsoft.KeyVault(SecretUri=https://${keyVaultName}.vault.azure.net/secrets/MissionControlAuthPass/)' }
