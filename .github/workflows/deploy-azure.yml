@@ -27,10 +27,9 @@ jobs:
     name: Provision Infrastructure (Bicep)
     runs-on: ubuntu-latest
     outputs:
-      acr_server:   ${{ steps.bicep.outputs.acrLoginServer }}
-      acr_username: ${{ steps.bicep.outputs.acrUsername }}
-      acr_password: ${{ steps.bicep.outputs.acrPassword }}
-      app_url:      ${{ steps.bicep.outputs.appServiceUrl }}
+      acr_server: ${{ steps.bicep.outputs.acrLoginServer }}
+      acr_name:   ${{ steps.bicep.outputs.acrName }}
+      app_url:    ${{ steps.bicep.outputs.appServiceUrl }}
 
     steps:
       - name: Checkout
@@ -52,7 +51,6 @@ jobs:
             appName=${{ env.APP_NAME }}
             acrName=${{ env.ACR_NAME }}
             keyVaultName=${{ env.KV_NAME }}
-            imageTag=${{ github.sha }}
           failOnStdErr: false
 
   # ── Job 2: Build image → push to ACR → deploy ────────────────────────────
@@ -72,12 +70,27 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Image tag: $TAG"
 
+      - name: Login to Azure (to fetch ACR creds)
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get ACR credentials
+        id: acr
+        run: |
+          ACR_USER=$(az acr credential show --name ${{ needs.infra.outputs.acr_name }} --query username -o tsv)
+          ACR_PASS=$(az acr credential show --name ${{ needs.infra.outputs.acr_name }} --query "passwords[0].value" -o tsv)
+          echo "username=$ACR_USER" >> $GITHUB_OUTPUT
+          echo "password=$ACR_PASS" >> $GITHUB_OUTPUT
+          # Mask password in logs
+          echo "::add-mask::$ACR_PASS"
+
       - name: Login to ACR
         uses: docker/login-action@v3
         with:
           registry: ${{ needs.infra.outputs.acr_server }}
-          username: ${{ needs.infra.outputs.acr_username }}
-          password: ${{ needs.infra.outputs.acr_password }}
+          username: ${{ steps.acr.outputs.username }}
+          password: ${{ steps.acr.outputs.password }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -93,17 +106,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
       - name: Update App Service container image
         run: |
           az webapp config container set \
             --name ${{ env.APP_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --container-image-name "${{ needs.infra.outputs.acr_server }}/mission-control:${{ steps.tag.outputs.tag }}"
+            --docker-custom-image-name "${{ needs.infra.outputs.acr_server }}/mission-control:${{ steps.tag.outputs.tag }}" \
+            --docker-registry-server-url "https://${{ needs.infra.outputs.acr_server }}" \
+            --docker-registry-server-user "${{ steps.acr.outputs.username }}" \
+            --docker-registry-server-password "${{ steps.acr.outputs.password }}"
 
       - name: Restart App Service
         run: |

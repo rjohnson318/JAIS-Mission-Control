@@ -30,8 +30,10 @@ param appServicePlanName string = 'asp-jais-prod'
 @description('Existing Key Vault name (RBAC mode)')
 param keyVaultName string = 'kv-jais-prod-01'
 
-@description('Container image tag to deploy')
-param imageTag string = 'latest'
+// imageTag is intentionally not a parameter here.
+// Bicep always configures the App Service to pull 'latest'.
+// The deploy job in GitHub Actions updates to the specific SHA tag after push.
+var imageTag = 'latest'
 
 // ── Existing resources ────────────────────────────────────────────────────────
 
@@ -111,18 +113,19 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
   }
 }
 
-// ── Azure Files mount for /app/.data ─────────────────────────────────────────
-// Sets storage mount via ARM config resource (more reliable than az CLI)
+// ── Azure Files mount for SQLite persistence ──────────────────────────────────
+// Note: 'azurestorageaccounts' must be lowercase — ARM is case-sensitive
+// Note: mount path cannot contain dots — use /home/data not /app/.data
 
 resource storageConfig 'Microsoft.Web/sites/config@2023-01-01' = {
   parent: appService
-  name: 'azureStorageAccounts'
+  name: 'azurestorageaccounts'
   properties: {
     'mc-sqlite': {
       type: 'AzureFiles'
       accountName: storageAccount.name
       shareName: fileShare.name
-      mountPath: '/app/.data'
+      mountPath: '/home/data'
       accessKey: storageAccount.listKeys().keys[0].value
     }
   }
@@ -146,15 +149,11 @@ resource kvSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' 
 
 // ── Outputs (consumed by deploy.yml) ─────────────────────────────────────────
 
-@description('ACR login server — used by docker push in CI')
+@description('ACR login server — e.g. jaisacr.azurecr.io')
 output acrLoginServer string = acr.properties.loginServer
 
-@description('ACR admin username — used by docker login in CI')
-output acrUsername string = acr.listCredentials().username
-
-@description('ACR admin password — used by docker login in CI')
-@secure()
-output acrPassword string = acr.listCredentials().passwords[0].value
+@description('ACR name — workflow uses this to call az acr credential show')
+output acrName string = acr.name
 
 @description('App Service default hostname')
 output appServiceUrl string = 'https://${appService.properties.defaultHostName}'
