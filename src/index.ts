@@ -3,7 +3,7 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 
-// Enhanced types for Mission Control
+// Enhanced types for JAIS Command Ops
 export interface Session {
   id: string
   key: string
@@ -80,7 +80,7 @@ export interface ModelConfig {
   costPer1k: number
 }
 
-// Mission Control Phase 2 Types
+// JAIS Command Ops Phase 2 Types
 export interface Task {
   id: number
   title: string
@@ -255,7 +255,7 @@ interface MissionControlStore {
   setConnection: (connection: Partial<ConnectionStatus>) => void
   setLastMessage: (message: any) => void
 
-  // Mission Control Phase 2 - Tasks
+  // JAIS Command Ops Phase 2 - Tasks
   tasks: Task[]
   selectedTask: Task | null
   setTasks: (tasks: Task[]) => void
@@ -264,7 +264,7 @@ interface MissionControlStore {
   updateTask: (taskId: number, updates: Partial<Task>) => void
   deleteTask: (taskId: number) => void
 
-  // Mission Control Phase 2 - Agents
+  // JAIS Command Ops Phase 2 - Agents
   agents: Agent[]
   selectedAgent: Agent | null
   setAgents: (agents: Agent[]) => void
@@ -273,12 +273,12 @@ interface MissionControlStore {
   updateAgent: (agentId: number, updates: Partial<Agent>) => void
   deleteAgent: (agentId: number) => void
 
-  // Mission Control Phase 2 - Activities
+  // JAIS Command Ops Phase 2 - Activities
   activities: Activity[]
   setActivities: (activities: Activity[]) => void
   addActivity: (activity: Activity) => void
 
-  // Mission Control Phase 2 - Notifications
+  // JAIS Command Ops Phase 2 - Notifications
   notifications: Notification[]
   unreadNotificationCount: number
   setNotifications: (notifications: Notification[]) => void
@@ -286,12 +286,12 @@ interface MissionControlStore {
   markNotificationRead: (notificationId: number) => void
   markAllNotificationsRead: () => void
 
-  // Mission Control Phase 2 - Comments
+  // JAIS Command Ops Phase 2 - Comments
   taskComments: Record<number, Comment[]>
   setTaskComments: (taskId: number, comments: Comment[]) => void
   addTaskComment: (taskId: number, comment: Comment) => void
 
-  // Mission Control Phase 2 - Standup
+  // JAIS Command Ops Phase 2 - Standup
   standupReports: StandupReport[]
   currentStandupReport: StandupReport | null
   setStandupReports: (reports: StandupReport[]) => void
@@ -582,7 +582,7 @@ export const useMissionControl = create<MissionControlStore>()(
         return { liveFeedOpen: next }
       }),
 
-    // Mission Control Phase 2 - Tasks
+    // JAIS Command Ops Phase 2 - Tasks
     tasks: [],
     selectedTask: null,
     setTasks: (tasks) => set({ tasks }),
@@ -606,7 +606,7 @@ export const useMissionControl = create<MissionControlStore>()(
         selectedTask: state.selectedTask?.id === taskId ? null : state.selectedTask
       })),
 
-    // Mission Control Phase 2 - Agents
+    // JAIS Command Ops Phase 2 - Agents
     agents: [],
     selectedAgent: null,
     setAgents: (agents) => set({ agents }),
@@ -630,7 +630,7 @@ export const useMissionControl = create<MissionControlStore>()(
         selectedAgent: state.selectedAgent?.id === agentId ? null : state.selectedAgent
       })),
 
-    // Mission Control Phase 2 - Activities
+    // JAIS Command Ops Phase 2 - Activities
     activities: [],
     setActivities: (activities) => set({ activities }),
     addActivity: (activity) =>
@@ -638,7 +638,7 @@ export const useMissionControl = create<MissionControlStore>()(
         activities: [activity, ...state.activities].slice(0, 1000) // Keep last 1000
       })),
 
-    // Mission Control Phase 2 - Notifications
+    // JAIS Command Ops Phase 2 - Notifications
     notifications: [],
     unreadNotificationCount: 0,
     setNotifications: (notifications) =>
@@ -668,7 +668,7 @@ export const useMissionControl = create<MissionControlStore>()(
         unreadNotificationCount: 0
       })),
 
-    // Mission Control Phase 2 - Comments
+    // JAIS Command Ops Phase 2 - Comments
     taskComments: {},
     setTaskComments: (taskId, comments) =>
       set((state) => ({
@@ -739,7 +739,7 @@ export const useMissionControl = create<MissionControlStore>()(
         )
       })),
 
-    // Mission Control Phase 2 - Standup
+    // JAIS Command Ops Phase 2 - Standup
     standupReports: [],
     currentStandupReport: null,
     setStandupReports: (reports) => set({ standupReports: reports }),

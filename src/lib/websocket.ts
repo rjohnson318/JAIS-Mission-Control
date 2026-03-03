@@ -138,7 +138,7 @@ export function useWebSocket() {
         maxProtocol: PROTOCOL_VERSION,
         client: {
           id: 'gateway-client',
-          displayName: 'Mission Control',
+          displayName: 'JAIS Command Ops',
           version: '2.0.0',
           platform: 'web',
           mode: 'ui',
