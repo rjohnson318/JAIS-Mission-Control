@@ -1,29 +1,46 @@
 // JAIS Mission Control — Azure Infrastructure
-// Uses existing: App Service Plan (asp-jais-prod), Resource Group (rg-jais-prod)
-// Creates new:   App Service, ACR, Storage Account (SQLite), Key Vault role assignment
+// ─────────────────────────────────────────────
+// Run via GitHub Actions (deploy.yml). Do not apply with az CLI directly.
+//
+// What this creates:
+//   - Azure Container Registry (Basic)
+//   - Storage Account + Azure Files share  → SQLite persistence at /app/.data
+//   - App Service (Linux container)        → pulls from ACR, secrets from Key Vault
+//   - Managed Identity + KV role assignment
+//
+// What this references (must already exist):
+//   - Resource Group    → rg-jais-prod
+//   - App Service Plan  → asp-jais-prod  (Linux B1)
+//   - Key Vault         → kv-jais-prod-01 (RBAC mode, secrets pre-loaded)
 
-@description('Azure region — must match existing resource group')
+// ── Parameters ────────────────────────────────────────────────────────────────
+
+@description('Azure region — must match the resource group')
 param location string = 'eastus2'
 
 @description('App Service name')
 param appName string = 'app-jais-mc-prod'
 
+@description('Azure Container Registry name (globally unique, alphanumeric only)')
+param acrName string = 'jaisacr'
+
 @description('Existing App Service Plan name')
 param appServicePlanName string = 'asp-jais-prod'
 
-@description('Azure Container Registry name (globally unique, alphanumeric)')
-param acrName string = 'jaisacr'
-
-@description('Existing Key Vault name')
+@description('Existing Key Vault name (RBAC mode)')
 param keyVaultName string = 'kv-jais-prod-01'
 
 @description('Container image tag to deploy')
 param imageTag string = 'latest'
 
-// ── Reference existing App Service Plan ───────────────────────────────────────
+// ── Existing resources ────────────────────────────────────────────────────────
 
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-01-01' existing = {
   name: appServicePlanName
+}
+
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
+  name: keyVaultName
 }
 
 // ── Azure Container Registry ──────────────────────────────────────────────────
@@ -37,7 +54,7 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   }
 }
 
-// ── Dedicated Storage Account for SQLite persistence ─────────────────────────
+// ── Storage Account + Azure Files share (SQLite at /app/.data) ────────────────
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   name: 'stjaismcprod'
@@ -64,7 +81,7 @@ resource fileShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-0
   }
 }
 
-// ── App Service (Container) ───────────────────────────────────────────────────
+// ── App Service (Linux container) ─────────────────────────────────────────────
 
 resource appService 'Microsoft.Web/sites@2023-01-01' = {
   name: appName
@@ -80,11 +97,11 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
       linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/mission-control:${imageTag}'
       alwaysOn: true
       appSettings: [
-        { name: 'WEBSITES_PORT',                    value: '3000' }
-        { name: 'NODE_ENV',                         value: 'production' }
-        { name: 'DOCKER_REGISTRY_SERVER_URL',       value: 'https://${acr.properties.loginServer}' }
-        { name: 'DOCKER_REGISTRY_SERVER_USERNAME',  value: acr.listCredentials().username }
-        { name: 'DOCKER_REGISTRY_SERVER_PASSWORD',  value: acr.listCredentials().passwords[0].value }
+        { name: 'WEBSITES_PORT',                   value: '3000' }
+        { name: 'NODE_ENV',                        value: 'production' }
+        { name: 'DOCKER_REGISTRY_SERVER_URL',      value: 'https://${acr.properties.loginServer}' }
+        { name: 'DOCKER_REGISTRY_SERVER_USERNAME', value: acr.listCredentials().username }
+        { name: 'DOCKER_REGISTRY_SERVER_PASSWORD', value: acr.listCredentials().passwords[0].value }
         // Key Vault references — resolved at runtime via Managed Identity
         { name: 'AUTH_USER', value: '@Microsoft.KeyVault(SecretUri=https://${keyVaultName}.vault.azure.net/secrets/MissionControlAuthUser/)' }
         { name: 'AUTH_PASS', value: '@Microsoft.KeyVault(SecretUri=https://${keyVaultName}.vault.azure.net/secrets/MissionControlAuthPass/)' }
@@ -94,24 +111,50 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
   }
 }
 
-// ── Key Vault: grant Managed Identity read access (RBAC mode) ─────────────────
+// ── Azure Files mount for /app/.data ─────────────────────────────────────────
+// Sets storage mount via ARM config resource (more reliable than az CLI)
 
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
+resource storageConfig 'Microsoft.Web/sites/config@2023-01-01' = {
+  parent: appService
+  name: 'azureStorageAccounts'
+  properties: {
+    'mc-sqlite': {
+      type: 'AzureFiles'
+      accountName: storageAccount.name
+      shareName: fileShare.name
+      mountPath: '/app/.data'
+      accessKey: storageAccount.listKeys().keys[0].value
+    }
+  }
 }
 
+// ── Key Vault: grant App Service Managed Identity read access (RBAC) ──────────
+
 resource kvSecretsUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, appService.id, 'Key Vault Secrets User')
+  name: guid(keyVault.id, appService.id, 'kv-secrets-user')
   scope: keyVault
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6') // Key Vault Secrets User
+    // Key Vault Secrets User — built-in role ID
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '4633458b-17de-408a-b874-0445c86b69e6'
+    )
     principalId: appService.identity.principalId
     principalType: 'ServicePrincipal'
   }
 }
 
-// ── Outputs ───────────────────────────────────────────────────────────────────
+// ── Outputs (consumed by deploy.yml) ─────────────────────────────────────────
 
-output appServiceUrl string = 'https://${appService.properties.defaultHostName}'
+@description('ACR login server — used by docker push in CI')
 output acrLoginServer string = acr.properties.loginServer
-output appServicePrincipalId string = appService.identity.principalId
+
+@description('ACR admin username — used by docker login in CI')
+output acrUsername string = acr.listCredentials().username
+
+@description('ACR admin password — used by docker login in CI')
+@secure()
+output acrPassword string = acr.listCredentials().passwords[0].value
+
+@description('App Service default hostname')
+output appServiceUrl string = 'https://${appService.properties.defaultHostName}'

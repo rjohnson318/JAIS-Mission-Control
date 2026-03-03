@@ -1,69 +1,138 @@
-name: Deploy to Azure App Service
+name: Deploy to Azure
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (default: git SHA)'
+        required: false
+        default: ''
 
 concurrency:
   group: deploy-azure
-  cancel-in-progress: false
+  cancel-in-progress: false   # never cancel a deploy mid-flight
 
 env:
-  IMAGE_NAME: mission-control
+  AZURE_RESOURCE_GROUP: rg-jais-prod
+  APP_NAME: app-jais-mc-prod
+  ACR_NAME: jaisacr
+  KV_NAME: kv-jais-prod-01
+  BICEP_FILE: infra/mission-control.bicep
 
 jobs:
-  build-and-deploy:
+  # ── Job 1: Provision / reconcile infrastructure via Bicep ─────────────────
+  infra:
+    name: Provision Infrastructure (Bicep)
     runs-on: ubuntu-latest
+    outputs:
+      acr_server:   ${{ steps.bicep.outputs.acrLoginServer }}
+      acr_username: ${{ steps.bicep.outputs.acrUsername }}
+      acr_password: ${{ steps.bicep.outputs.acrPassword }}
+      app_url:      ${{ steps.bicep.outputs.appServiceUrl }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Log in to Azure Container Registry
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy Bicep (idempotent)
+        id: bicep
+        uses: azure/arm-deploy@v2
+        with:
+          resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}
+          template: ${{ env.BICEP_FILE }}
+          deploymentName: mission-control-${{ github.run_number }}
+          parameters: >
+            appName=${{ env.APP_NAME }}
+            acrName=${{ env.ACR_NAME }}
+            keyVaultName=${{ env.KV_NAME }}
+            imageTag=${{ github.sha }}
+          failOnStdErr: false
+
+  # ── Job 2: Build image → push to ACR → deploy ────────────────────────────
+  deploy:
+    name: Build & Deploy Container
+    runs-on: ubuntu-latest
+    needs: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.image_tag || github.sha }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Image tag: $TAG"
+
+      - name: Login to ACR
         uses: docker/login-action@v3
         with:
-          registry: ${{ secrets.ACR_LOGIN_SERVER }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
+          registry: ${{ needs.infra.outputs.acr_server }}
+          username: ${{ needs.infra.outputs.acr_username }}
+          password: ${{ needs.infra.outputs.acr_password }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+            ${{ needs.infra.outputs.acr_server }}/mission-control:${{ steps.tag.outputs.tag }}
+            ${{ needs.infra.outputs.acr_server }}/mission-control:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Log in to Azure
+      - name: Login to Azure
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to Azure App Service
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
-          resource-group-name: ${{ secrets.AZURE_RESOURCE_GROUP }}
-          images: ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+      - name: Update App Service container image
+        run: |
+          az webapp config container set \
+            --name ${{ env.APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --container-image-name "${{ needs.infra.outputs.acr_server }}/mission-control:${{ steps.tag.outputs.tag }}"
 
-      - name: Verify deployment health
+      - name: Restart App Service
+        run: |
+          az webapp restart \
+            --name ${{ env.APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+
+      - name: Wait for health check
         run: |
           echo "Waiting for app to become healthy..."
-          for i in {1..15}; do
+          for i in $(seq 1 20); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/status || echo "000")
+              "https://${{ env.APP_NAME }}.azurewebsites.net/api/status" || echo "000")
             if [ "$STATUS" = "200" ]; then
-              echo "✅ App is healthy (HTTP $STATUS)"
+              echo "✅ Healthy at ${{ needs.infra.outputs.app_url }}"
               exit 0
             fi
-            echo "  Attempt $i/15 — got HTTP $STATUS, retrying in 10s..."
-            sleep 10
+            echo "  Attempt $i/20 — HTTP $STATUS, waiting 15s..."
+            sleep 15
           done
-          echo "⚠️ App did not become healthy within 2.5 minutes"
+          echo "⚠️ App not healthy after 5 minutes — check Azure portal logs"
           exit 1
+
+      - name: Summary
+        run: |
+          echo "## ✅ Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | ${{ needs.infra.outputs.app_url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`mission-control:${{ steps.tag.outputs.tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY

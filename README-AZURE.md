@@ -1,75 +1,88 @@
-# JAIS Mission Control — Azure Deployment Guide
+# JAIS Mission Control — Azure Deployment
 
-## Prerequisites
-
-- Azure CLI (`az login`)
-- An existing Resource Group and Key Vault (`kv-jais-prod`)
-- Three secrets pre-loaded in Key Vault:
-  - `MissionControlAuthUser` — login username
-  - `MissionControlAuthPass` — login password
-  - `MissionControlApiKey`  — API key for programmatic access
+Everything is driven from **GitHub Actions + Bicep**. No manual az CLI steps.
 
 ---
 
-## 1. Provision Azure Infrastructure
+## How it works
 
-```bash
-az deployment group create \
-  --resource-group <your-resource-group> \
-  --template-file infra/mission-control.bicep \
-  --parameters appName=jais-mission-control \
-               acrName=jaisacr \
-               keyVaultName=kv-jais-prod
+```
+push to main
+    │
+    ├─ Job 1: infra  →  az arm-deploy (Bicep, idempotent)
+    │                   provisions ACR, App Service, Storage, KV role
+    │                   outputs: ACR server + credentials
+    │
+    └─ Job 2: deploy  →  docker build + push to ACR
+                         az webapp config container set (new image tag)
+                         az webapp restart
+                         health check poll → summary
 ```
 
-Note the outputs: `appServiceUrl` and `acrLoginServer`. You'll need them for the next step.
+The Bicep deployment is **idempotent** — running it again updates resources to match the template without recreating them. Infrastructure and app deploy happen in the same pipeline on every push to `main`.
 
 ---
 
-## 2. Configure GitHub Secrets
+## One-time setup
 
-In your repo → Settings → Secrets → Actions, add:
+### 1. GitHub Actions secrets (2 required)
+
+Go to **Settings → Secrets → Actions** in this repo and add:
 
 | Secret | Value |
 |---|---|
-| `AZURE_CREDENTIALS` | JSON from `az ad sp create-for-rbac --sdk-auth` |
-| `ACR_LOGIN_SERVER` | From Bicep output (`acrLoginServer`) |
-| `ACR_USERNAME` | ACR admin username (Azure Portal → ACR → Access keys) |
-| `ACR_PASSWORD` | ACR admin password |
-| `AZURE_WEBAPP_NAME` | `jais-mission-control` |
-| `AZURE_RESOURCE_GROUP` | Your resource group name |
+| `AZURE_CREDENTIALS` | Output of `az ad sp create-for-rbac --sdk-auth --role contributor --scopes /subscriptions/<id>/resourceGroups/rg-jais-prod` |
+| *(everything else)* | Pulled from Bicep outputs at runtime — no other secrets needed |
 
----
+### 2. Key Vault secrets (3, set once — rotate in KV directly)
 
-## 3. Custom Domain
+These must exist in `kv-jais-prod-01` before first deploy:
 
-Point `ops.jaissolutions.com` at the App Service:
+```bash
+az keyvault secret set --vault-name kv-jais-prod-01 --name MissionControlAuthUser --value "BigDog"
+az keyvault secret set --vault-name kv-jais-prod-01 --name MissionControlAuthPass --value "<generated>"
+az keyvault secret set --vault-name kv-jais-prod-01 --name MissionControlApiKey  --value "<generated>"
+```
+
+> Already done for the initial deploy. To rotate: update the secret in KV → restart the App Service.
+
+### 3. Custom domain (one-time)
 
 ```bash
 az webapp config hostname add \
-  --webapp-name jais-mission-control \
-  --resource-group <your-resource-group> \
+  --webapp-name app-jais-mc-prod \
+  --resource-group rg-jais-prod \
   --hostname ops.jaissolutions.com
 ```
 
-Then add a CNAME in Cloudflare: `ops` → `jais-mission-control.azurewebsites.net` (proxied ✅).
+Then add a **CNAME** in Cloudflare: `ops` → `app-jais-mc-prod.azurewebsites.net` (proxied ✅).
 
 ---
 
-## 4. Deploy
+## Deploy
 
-Push to `main` — GitHub Actions builds the Docker image, pushes to ACR, and deploys automatically. Monitor in the **Actions** tab.
+**Normal deploy:** push or merge to `main` — CI handles everything.
 
-To manually trigger a deploy without a code change:
+**Manual trigger:** GitHub → Actions → "Deploy to Azure" → Run workflow (optionally specify an image tag).
 
-```
-GitHub → Actions → "Deploy to Azure App Service" → Run workflow
-```
+**First deploy:** runs Bicep first (creates ACR, App Service, etc.), then builds + pushes the image. Takes ~8-10 min.
 
 ---
 
-## 5. Upstream Updates
+## Upstream updates
 
-A daily workflow (`sync-upstream.yml`) checks [builderz-labs/mission-control](https://github.com/builderz-labs/mission-control) for new releases. When a new version is found, it opens a PR updating `UPSTREAM_VERSION`. Review the upstream changelog, then merge the PR — CI handles the rest.
+A daily workflow (`sync-upstream.yml`) checks [builderz-labs/mission-control](https://github.com/builderz-labs/mission-control) for new releases. When a newer version is found it opens a PR updating `UPSTREAM_VERSION`. Review the upstream changelog → merge → CI deploys automatically.
 
-Current pinned version: see `UPSTREAM_VERSION` file.
+---
+
+## Infra changes
+
+Edit `infra/mission-control.bicep` → push to `main` → the `infra` job reconciles Azure to match. No manual az CLI needed.
+
+## Secrets rotation
+
+Update the secret value in `kv-jais-prod-01` via Azure Portal or:
+```bash
+az keyvault secret set --vault-name kv-jais-prod-01 --name MissionControlAuthPass --value "<new>"
+az webapp restart --name app-jais-mc-prod --resource-group rg-jais-prod
+```
