@@ -47,7 +47,7 @@ interface Comment {
 }
 
 const statusColumns = [
-  { key: 'inbox', title: 'Inbox', color: 'bg-secondary text-foreground' },
+  { key: 'inbox', title: 'Backlog', color: 'bg-secondary text-foreground' },
   { key: 'assigned', title: 'Assigned', color: 'bg-blue-500/20 text-blue-400' },
   { key: 'in_progress', title: 'In Progress', color: 'bg-yellow-500/20 text-yellow-400' },
   { key: 'review', title: 'Review', color: 'bg-purple-500/20 text-purple-400' },
@@ -634,6 +634,19 @@ function TaskDetailModal({
       )}
     </div>
   )
+
+  const statusLabel: Record<string, string> = {
+    inbox: 'Backlog', assigned: 'Assigned', in_progress: 'In Progress',
+    review: 'Review', quality_review: 'Quality Review', done: 'Done',
+  }
+  const statusBadgeColor: Record<string, string> = {
+    inbox:          'bg-secondary text-muted-foreground',
+    assigned:       'bg-blue-500/20 text-blue-400',
+    in_progress:    'bg-yellow-500/20 text-yellow-400',
+    review:         'bg-purple-500/20 text-purple-400',
+    quality_review: 'bg-indigo-500/20 text-indigo-400',
+    done:           'bg-green-500/20 text-green-400',
+  }
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
