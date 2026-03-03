@@ -131,7 +131,7 @@ export function HeaderBar() {
       {/* Left: Page title + breadcrumb */}
       <div className="flex items-center gap-3">
         <h1 className="text-sm font-semibold text-foreground">
-          {tabLabels[activeTab] || 'Mission Control'}
+          {tabLabels[activeTab] || 'JAIS Command Ops'}
         </h1>
         <span className="text-2xs text-muted-foreground font-mono-tight">
           v2.0

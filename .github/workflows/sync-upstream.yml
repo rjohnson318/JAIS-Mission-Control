@@ -1,0 +1,82 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # Daily at 9am UTC
+  workflow_dispatch:        # Allow manual trigger
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get current pinned version
+        id: current
+        run: |
+          VERSION=$(cat UPSTREAM_VERSION | tr -d '[:space:]')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current pinned version: $VERSION"
+
+      - name: Get latest upstream release
+        id: upstream
+        run: |
+          LATEST=$(curl -s https://api.github.com/repos/builderz-labs/mission-control/releases/latest \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            | jq -r '.tag_name')
+          echo "version=$LATEST" >> $GITHUB_OUTPUT
+          echo "Latest upstream version: $LATEST"
+
+      - name: Compare versions
+        id: compare
+        run: |
+          CURRENT="${{ steps.current.outputs.version }}"
+          UPSTREAM="${{ steps.upstream.outputs.version }}"
+          if [ "$CURRENT" != "$UPSTREAM" ] && [ "$UPSTREAM" != "null" ] && [ -n "$UPSTREAM" ]; then
+            echo "needs_update=true" >> $GITHUB_OUTPUT
+            echo "🆕 Upstream has a new release: $CURRENT → $UPSTREAM"
+          else
+            echo "needs_update=false" >> $GITHUB_OUTPUT
+            echo "✅ Already up to date at $CURRENT"
+          fi
+
+      - name: Create update branch and PR
+        if: steps.compare.outputs.needs_update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+          CURRENT_VERSION: ${{ steps.current.outputs.version }}
+        run: |
+          BRANCH="chore/bump-upstream-${UPSTREAM_VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+          echo "$UPSTREAM_VERSION" > UPSTREAM_VERSION
+          git add UPSTREAM_VERSION
+          git commit -m "chore: bump upstream to ${UPSTREAM_VERSION}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "chore: bump upstream to ${UPSTREAM_VERSION}" \
+            --body "## Upstream Release: ${UPSTREAM_VERSION}
+
+The upstream repo [builderz-labs/mission-control](https://github.com/builderz-labs/mission-control) has released a new version.
+
+- **Current pinned version:** \`${CURRENT_VERSION}\`
+- **New upstream version:** \`${UPSTREAM_VERSION}\`
+
+### What to do
+1. Review the [upstream changelog](https://github.com/builderz-labs/mission-control/releases/tag/${UPSTREAM_VERSION})
+2. Check for any breaking changes or migration steps
+3. Merge this PR to trigger an automatic build + deploy to Azure
+
+> ⚠️ This PR only bumps the version pin. Manual cherry-picking of upstream changes may be needed if you maintain local customizations beyond env/config." \
+            --base main \
+            --head "$BRANCH"

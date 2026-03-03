@@ -104,7 +104,7 @@ export default function LoginPage() {
           <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center mb-3">
             <span className="text-primary-foreground font-bold text-lg">MC</span>
           </div>
-          <h1 className="text-xl font-semibold text-foreground">Mission Control</h1>
+          <h1 className="text-xl font-semibold text-foreground">JAIS Command Ops</h1>
           <p className="text-sm text-muted-foreground mt-1">Sign in to continue</p>
         </div>
 
