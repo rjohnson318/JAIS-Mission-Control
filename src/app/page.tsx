@@ -53,16 +53,19 @@ export default function Home() {
       .then(data => { if (data?.user) setCurrentUser(data.user) })
       .catch(() => {})
 
-    // Auto-connect to gateway on mount
-    const wsToken = process.env.NEXT_PUBLIC_GATEWAY_TOKEN || process.env.NEXT_PUBLIC_WS_TOKEN || ''
-    const explicitWsUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || ''
-    const gatewayPort = process.env.NEXT_PUBLIC_GATEWAY_PORT || '18789'
-    const gatewayHost = process.env.NEXT_PUBLIC_GATEWAY_HOST || window.location.hostname
-    const gatewayProto =
-      process.env.NEXT_PUBLIC_GATEWAY_PROTOCOL ||
-      (window.location.protocol === 'https:' ? 'wss' : 'ws')
-    const wsUrl = explicitWsUrl || `${gatewayProto}://${gatewayHost}:${gatewayPort}`
-    connect(wsUrl, wsToken)
+    // Auto-connect to gateway on mount (skip if disabled — e.g. Azure deploy without gateway access)
+    const gatewayDisabled = process.env.NEXT_PUBLIC_DISABLE_GATEWAY === '1' || process.env.NEXT_PUBLIC_DISABLE_GATEWAY === 'true'
+    if (!gatewayDisabled) {
+      const wsToken = process.env.NEXT_PUBLIC_GATEWAY_TOKEN || process.env.NEXT_PUBLIC_WS_TOKEN || ''
+      const explicitWsUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || ''
+      const gatewayPort = process.env.NEXT_PUBLIC_GATEWAY_PORT || '18789'
+      const gatewayHost = process.env.NEXT_PUBLIC_GATEWAY_HOST || window.location.hostname
+      const gatewayProto =
+        process.env.NEXT_PUBLIC_GATEWAY_PROTOCOL ||
+        (window.location.protocol === 'https:' ? 'wss' : 'ws')
+      const wsUrl = explicitWsUrl || `${gatewayProto}://${gatewayHost}:${gatewayPort}`
+      connect(wsUrl, wsToken)
+    }
   }, [connect, setCurrentUser])
 
   if (!isClient) {

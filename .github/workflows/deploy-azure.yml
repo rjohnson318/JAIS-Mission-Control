@@ -103,6 +103,8 @@ jobs:
           tags: |
             ${{ needs.infra.outputs.acr_server }}/mission-control:${{ steps.tag.outputs.tag }}
             ${{ needs.infra.outputs.acr_server }}/mission-control:latest
+          build-args: |
+            NEXT_PUBLIC_DISABLE_GATEWAY=1
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

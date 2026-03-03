@@ -11,6 +11,10 @@ RUN pnpm install --frozen-lockfile
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Build-time env vars baked into Next.js client bundle
+ARG NEXT_PUBLIC_DISABLE_GATEWAY=0
+ENV NEXT_PUBLIC_DISABLE_GATEWAY=$NEXT_PUBLIC_DISABLE_GATEWAY
+
 RUN pnpm build
 
 FROM node:20-slim AS runtime
