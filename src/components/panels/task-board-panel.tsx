@@ -56,10 +56,70 @@ const statusColumns = [
 ]
 
 const priorityColors = {
-  low: 'border-green-500',
-  medium: 'border-yellow-500',
-  high: 'border-orange-500',
-  urgent: 'border-red-500',
+  low:      'border-green-500',
+  medium:   'border-yellow-500',
+  high:     'border-orange-500',
+  urgent:   'border-red-500',
+  critical: 'border-red-600',
+}
+
+const priorityBadge: Record<string, string> = {
+  low:      'bg-green-500/15 text-green-400 border border-green-500/30',
+  medium:   'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30',
+  high:     'bg-orange-500/15 text-orange-400 border border-orange-500/30',
+  urgent:   'bg-red-500/15 text-red-400 border border-red-500/30',
+  critical: 'bg-red-600/15 text-red-400 border border-red-600/30',
+}
+
+const ownerBadge: Record<string, string> = {
+  CJ:       'bg-blue-500/15 text-blue-400',
+  Codex:    'bg-purple-500/15 text-purple-400',
+  Ralphael: 'bg-amber-500/15 text-amber-400',
+}
+
+// Simple description formatter — renders **bold** markers and newlines
+function formatDescription(text: string): React.ReactNode {
+  if (!text) return null
+  return text.split('\n').map((line, i) => {
+    const parts = line.split(/(\*\*[^*]+\*\*)/)
+    return (
+      <span key={i}>
+        {parts.map((part, j) =>
+          part.startsWith('**') && part.endsWith('**')
+            ? <strong key={j} className="text-foreground/90">{part.slice(2, -2)}</strong>
+            : <span key={j}>{part}</span>
+        )}
+        {i < text.split('\n').length - 1 && <br />}
+      </span>
+    )
+  })
+}
+
+// Extract structured fields embedded in description by the migration script
+function parseDescription(raw?: string): { body: string; successMetric?: string; dependency?: string; notes?: string } {
+  if (!raw) return { body: '' }
+  const sm  = raw.match(/\*\*Success metric:\*\*\s*([^\n*]+)/)
+  const dep = raw.match(/\*\*Dependency:\*\*\s*([^\n*]+)/)
+  const nt  = raw.match(/\*\*Notes:\*\*\s*([\s\S]+?)(?:\*\*|$)/)
+  const body = raw
+    .replace(/\n?\n?\*\*Success metric:\*\*[\s\S]*/, '')
+    .replace(/\n?\n?\*\*Dependency:\*\*[\s\S]*/, '')
+    .replace(/\n?\n?\*\*Notes:\*\*[\s\S]*/, '')
+    .trim()
+  return {
+    body,
+    successMetric: sm?.[1]?.trim(),
+    dependency:    dep?.[1]?.trim(),
+    notes:         nt?.[1]?.trim(),
+  }
+}
+
+function formatDate(ts: number): string {
+  return new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function isOverdue(ts: number): boolean {
+  return ts * 1000 < Date.now()
 }
 
 export function TaskBoardPanel() {
@@ -327,82 +387,73 @@ export function TaskBoardPanel() {
 
             {/* Column Body */}
             <div className="flex-1 p-3 space-y-3 min-h-32">
-              {tasksByStatus[column.key]?.map(task => (
+              {tasksByStatus[column.key]?.map(task => {
+                const { body } = parseDescription(task.description)
+                const owner = task.assigned_to
+                return (
                 <div
                   key={task.id}
                   draggable
                   onDragStart={(e) => handleDragStart(e, task)}
                   onClick={() => setSelectedTask(task)}
-                  className={`bg-surface-1 rounded-lg p-3 cursor-pointer hover:bg-surface-2 transition-smooth border-l-4 ${priorityColors[task.priority]} ${
-                    draggedTask?.id === task.id ? 'opacity-50' : ''
-                  }`}
+                  className={`bg-surface-1 rounded-lg p-3 cursor-pointer hover:bg-surface-2 transition-smooth border-l-4 ${priorityColors[task.priority] ?? 'border-border'} ${
+                    draggedTask?.id === task.id ? 'opacity-40' : ''
+                  } group`}
                 >
-                  <div className="flex justify-between items-start mb-2">
-                    <h4 className="text-foreground font-medium text-sm leading-tight">
+                  {/* Title row */}
+                  <div className="flex justify-between items-start gap-2 mb-2">
+                    <h4 className="text-foreground font-semibold text-sm leading-snug flex-1">
                       {task.title}
                     </h4>
-                    <div className="flex items-center gap-2">
-                      {task.aegisApproved && (
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-700 text-emerald-100">
-                          Aegis Approved
-                        </span>
-                      )}
-                      <span className={`text-xs px-2 py-1 rounded font-medium ${
-                        task.priority === 'urgent' ? 'bg-red-500/20 text-red-400' :
-                        task.priority === 'high' ? 'bg-orange-500/20 text-orange-400' :
-                        task.priority === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
-                        'bg-green-500/20 text-green-400'
-                      }`}>
-                        {task.priority}
-                      </span>
-                    </div>
+                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase tracking-wide ${priorityBadge[task.priority] ?? priorityBadge.medium}`}>
+                      {task.priority}
+                    </span>
                   </div>
-                  
-                  {task.description && (
-                    <p className="text-foreground/80 text-xs mb-2 line-clamp-2">
-                      {task.description}
+
+                  {/* Description preview — strip embedded markers */}
+                  {body && (
+                    <p className="text-muted-foreground text-xs mb-2 line-clamp-2 leading-relaxed">
+                      {body}
                     </p>
                   )}
 
-                  <div className="flex justify-between items-center text-xs text-muted-foreground">
-                    <span>{getAgentName(task.assigned_to)}</span>
-                    <span className="font-medium">{formatTaskTimestamp(task.created_at)}</span>
-                  </div>
-
+                  {/* Tags */}
                   {task.tags && task.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {task.tags.slice(0, 3).map((tag, index) => (
-                        <span
-                          key={index}
-                          className={`text-xs px-2 py-0.5 rounded-full border font-medium ${getTagColor(tag)}`}
-                        >
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {task.tags.slice(0, 3).map((tag, i) => (
+                        <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${getTagColor(tag)}`}>
                           {tag}
                         </span>
                       ))}
                       {task.tags.length > 3 && (
-                        <span className="text-muted-foreground text-xs font-medium">+{task.tags.length - 3}</span>
+                        <span className="text-[10px] text-muted-foreground/60 self-center">+{task.tags.length - 3}</span>
                       )}
                     </div>
                   )}
 
-                  {/* Enhanced timestamp display */}
-                  {task.updated_at && task.updated_at !== task.created_at && (
-                    <div className="text-xs text-muted-foreground/70 mt-1">
-                      Updated {formatTaskTimestamp(task.updated_at)}
+                  {/* Footer: owner + due date */}
+                  <div className="flex items-center justify-between mt-1 gap-2">
+                    <div className="flex items-center gap-1.5">
+                      {owner && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${ownerBadge[owner] ?? 'bg-secondary text-muted-foreground'}`}>
+                          {owner}
+                        </span>
+                      )}
+                      {task.aegisApproved && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-700/40 text-emerald-300 font-medium">✓ Aegis</span>
+                      )}
                     </div>
-                  )}
-
-                  {task.due_date && (
-                    <div className="mt-2 text-xs">
-                      <span className={`${
-                        task.due_date * 1000 < Date.now() ? 'text-red-400' : 'text-yellow-400'
-                      }`}>
-                        Due: {formatTaskTimestamp(task.due_date)}
+                    {task.due_date ? (
+                      <span className={`text-[10px] font-medium ${isOverdue(task.due_date) ? 'text-red-400' : 'text-muted-foreground/70'}`}>
+                        {isOverdue(task.due_date) ? '⚠ ' : ''}Due {formatDate(task.due_date)}
                       </span>
-                    </div>
-                  )}
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground/40">{formatTaskTimestamp(task.updated_at ?? task.created_at)}</span>
+                    )}
+                  </div>
                 </div>
-              ))}
+                )
+              })}
 
               {/* Empty State */}
               {tasksByStatus[column.key]?.length === 0 && (
@@ -437,7 +488,7 @@ export function TaskBoardPanel() {
   )
 }
 
-// Task Detail Modal Component (placeholder - would be implemented separately)
+// Task Detail Modal — structured layout matching JAIS Command Ops style
 function TaskDetailModal({ 
   task, 
   agents, 
@@ -452,7 +503,7 @@ function TaskDetailModal({
   const [comments, setComments] = useState<Comment[]>([])
   const [loadingComments, setLoadingComments] = useState(false)
   const [commentText, setCommentText] = useState('')
-  const [commentAuthor, setCommentAuthor] = useState('system')
+  const [commentAuthor, setCommentAuthor] = useState('CJ')
   const [commentError, setCommentError] = useState<string | null>(null)
   const [broadcastMessage, setBroadcastMessage] = useState('')
   const [broadcastStatus, setBroadcastStatus] = useState<string | null>(null)
@@ -462,6 +513,8 @@ function TaskDetailModal({
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'details' | 'comments' | 'quality'>('details')
   const [reviewer, setReviewer] = useState('aegis')
+
+  const { body, successMetric, dependency, notes } = parseDescription(task.description)
 
   const fetchReviews = useCallback(async () => {
     try {
@@ -583,51 +636,136 @@ function TaskDetailModal({
   )
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-card border border-border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex justify-between items-start mb-4">
-            <h3 className="text-xl font-bold text-foreground">{task.title}</h3>
-            <button
-              onClick={onClose}
-              className="text-muted-foreground hover:text-foreground text-2xl transition-smooth"
-            >
-              ×
-            </button>
-          </div>
-          <p className="text-foreground/80 mb-4">{task.description || 'No description'}</p>
-          <div className="flex gap-2 mt-4">
-            {(['details', 'comments', 'quality'] as const).map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-3 py-2 text-sm rounded-md transition-smooth ${
-                  activeTab === tab ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:bg-surface-2'
-                }`}
-              >
-                {tab === 'details' ? 'Details' : tab === 'comments' ? 'Comments' : 'Quality Review'}
-              </button>
-            ))}
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-card border border-border rounded-xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl">
+
+        {/* ── Modal Header ─────────────────────────────── */}
+        <div className="p-5 border-b border-border">
+          <div className="flex justify-between items-start gap-3 mb-3">
+            <h3 className="text-lg font-bold text-foreground leading-snug flex-1">{task.title}</h3>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl shrink-0 leading-none transition-smooth">×</button>
           </div>
 
+          {/* Status + Priority badges */}
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${statusBadgeColor[task.status] ?? 'bg-secondary text-muted-foreground'}`}>
+              {statusLabel[task.status] ?? task.status}
+            </span>
+            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold border ${priorityBadge[task.priority] ?? priorityBadge.medium}`}>
+              {task.priority?.toUpperCase()}
+            </span>
+            {task.aegisApproved && (
+              <span className="text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-700/40 text-emerald-300 border border-emerald-500/30">✓ Aegis Approved</span>
+            )}
+          </div>
+
+          {/* Metadata row */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1.5 text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground/60 uppercase tracking-wide font-semibold text-[10px]">Owner</span>
+              {task.assigned_to
+                ? <span className={`px-2 py-0.5 rounded font-medium ${ownerBadge[task.assigned_to] ?? 'bg-secondary text-muted-foreground'}`}>{task.assigned_to}</span>
+                : <span className="text-muted-foreground italic">Unassigned</span>
+              }
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground/60 uppercase tracking-wide font-semibold text-[10px]">Due</span>
+              {task.due_date
+                ? <span className={`font-medium ${isOverdue(task.due_date) ? 'text-red-400' : 'text-foreground/80'}`}>
+                    {isOverdue(task.due_date) ? '⚠ ' : ''}{formatDate(task.due_date)}
+                  </span>
+                : <span className="text-muted-foreground italic">No date</span>
+              }
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground/60 uppercase tracking-wide font-semibold text-[10px]">Created</span>
+              <span className="text-foreground/80">{formatDate(task.created_at)}</span>
+            </div>
+          </div>
+
+          {/* Tags */}
+          {task.tags && task.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {task.tags.map((tag, i) => (
+                <span key={i} className={`text-[10px] px-2 py-0.5 rounded border font-medium ${getTagColor(tag)}`}>{tag}</span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Tabs ─────────────────────────────────────── */}
+        <div className="flex gap-1 px-5 pt-3 border-b border-border">
+          {(['details', 'comments', 'quality'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-3 py-2 text-sm rounded-t transition-smooth font-medium ${
+                activeTab === tab
+                  ? 'bg-primary/10 text-primary border-b-2 border-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab === 'details' ? 'Details' : tab === 'comments' ? `Comments` : 'Quality Review'}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-5">
+
+          {/* ── Details Tab ──────────────────────────────── */}
           {activeTab === 'details' && (
-            <div className="grid grid-cols-2 gap-4 text-sm mt-4">
-              <div>
-                <span className="text-muted-foreground">Status:</span>
-                <span className="text-foreground ml-2">{task.status}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Priority:</span>
-                <span className="text-foreground ml-2">{task.priority}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Assigned to:</span>
-                <span className="text-foreground ml-2">{task.assigned_to || 'Unassigned'}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Created:</span>
-                <span className="text-foreground ml-2">{new Date(task.created_at * 1000).toLocaleDateString()}</span>
-              </div>
+            <div className="space-y-5">
+
+              {/* Description */}
+              {body && (
+                <div>
+                  <h4 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">Description</h4>
+                  <div className="text-sm text-foreground/85 leading-relaxed bg-surface-1/50 rounded-lg p-3 border border-border/50 whitespace-pre-wrap">
+                    {formatDescription(body)}
+                  </div>
+                </div>
+              )}
+
+              {/* Success Metric */}
+              {successMetric && (
+                <div>
+                  <h4 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">Success Metric</h4>
+                  <div className="text-sm text-foreground/85 bg-green-500/5 border border-green-500/20 rounded-lg p-3">
+                    {successMetric}
+                  </div>
+                </div>
+              )}
+
+              {/* Dependency */}
+              {dependency && dependency.toLowerCase() !== 'none' && (
+                <div>
+                  <h4 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">Dependency</h4>
+                  <div className="text-sm text-foreground/85 bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-3">
+                    {dependency}
+                  </div>
+                </div>
+              )}
+
+              {/* Notes */}
+              {notes && (
+                <div>
+                  <h4 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">Notes</h4>
+                  <div className="space-y-1.5">
+                    {notes.split(' | ').map((note, i) => (
+                      <div key={i} className="text-sm text-foreground/85 bg-surface-1/50 rounded-lg p-2.5 border border-border/50 flex gap-2">
+                        <span className="text-primary/60 shrink-0">▸</span>
+                        <span>{note.trim()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* If description has no structured parts and no separate fields, show raw */}
+              {!body && !successMetric && !dependency && !notes && (
+                <div className="text-sm text-muted-foreground italic">No description provided.</div>
+              )}
+
             </div>
           )}
 
@@ -714,6 +852,7 @@ function TaskDetailModal({
           </div>
           )}
 
+          {/* ── Quality Tab ──────────────────────────────── */}
           {activeTab === 'quality' && (
             <div className="mt-6">
               <h5 className="text-sm font-medium text-foreground mb-2">Aegis Quality Review</h5>
